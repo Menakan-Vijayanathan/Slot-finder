@@ -1,69 +1,436 @@
-# React + TypeScript + Vite
+# World Clock Meet Helper - Chrome Extension
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A comprehensive Chrome side-panel extension for comparing timezones and creating Google Calendar meetings with ease. Perfect for remote teams and international business.
 
-Currently, two official plugins are available:
+## 🚀 Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Side-Panel Interface**: Persistent, resizable side-panel with timezone comparison
+- **Interactive Time Slider**: 24-hour horizontal time slider similar to WorldTimeBuddy
+- **Real-time Updates**: Current time marker that updates every second
+- **Timezone Management**: Add/remove/reorder timezones with autocomplete search
+- **Google Calendar Integration**: OAuth 2.0 authentication with multiple account support
+- **Meeting Creation**: Create calendar events with automatic Google Meet links
+- **Data Persistence**: Stores preferences and recent contacts across sessions
+- **Dark/Light Mode**: Automatic theme switching based on system preferences
 
-## Expanding the ESLint configuration
+## 📁 Project Structure
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+world-clock-meet-helper/
+├── manifest.json                 # Chrome extension manifest v3
+├── package.json                  # Dependencies and scripts
+├── vite.config.ts               # Vite build configuration
+├── tailwind.config.js           # Tailwind CSS configuration
+├── postcss.config.js            # PostCSS configuration
+├── tsconfig.json                # TypeScript configuration
+├── 
+├── sidepanel.html               # Side-panel HTML entry point
+├── options.html                 # Options page HTML
+├── popup.html                   # Extension popup HTML
+├── 
+├── src/
+│   ├── background.ts            # Service worker for extension
+│   ├── sidepanel.tsx           # Side-panel React entry point
+│   ├── options.tsx             # Options page React entry point
+│   ├── popup.tsx               # Popup React entry point
+│   ├── index.css               # Global styles and Tailwind
+│   │
+│   ├── components/
+│   │   ├── App.tsx             # Main side-panel application
+│   │   ├── TimeZoneManager.tsx # Timezone add/remove/reorder
+│   │   ├── TimeSlider.tsx      # Interactive 24-hour time slider
+│   │   ├── MeetingModal.tsx    # Meeting creation modal
+│   │   ├── OptionsPage.tsx     # Settings and preferences
+│   │   └── PopupPage.tsx       # Extension popup content
+│   │
+│   ├── hooks/
+│   │   ├── useStorage.ts       # Chrome storage hook
+│   │   ├── useAuth.ts          # Google OAuth authentication
+│   │   ├── useCalendar.ts      # Google Calendar API integration
+│   │   └── useCurrentTime.ts   # Real-time clock updates
+│   │
+│   ├── types/
+│   │   └── index.ts            # TypeScript type definitions
+│   │
+│   ├── data/
+│   │   └── timezones.ts        # IANA timezone database
+│   │
+│   └── utils/
+│       └── cn.ts               # Utility for CSS class merging
+│
+├── icons/                      # Extension icons (16, 32, 48, 128px)
+│   ├── icon16.png
+│   ├── icon32.png
+│   ├── icon48.png
+│   └── icon128.png
+│
+└── README.md                   # This file
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## 🛠️ Setup Instructions
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Prerequisites
 
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- Node.js 18+ 
+- npm or pnpm
+- Chrome browser
+- Google Cloud Console account
+
+### 1. Clone and Install
+
+```bash
+git clone <repository-url>
+cd world-clock-meet-helper
+npm install
+# or
+pnpm install
 ```
+
+### 2. Google API Console Setup
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select existing one
+3. Enable the following APIs:
+   - Google Calendar API
+   - Google+ API (for user info)
+
+4. Create OAuth 2.0 credentials:
+   - Go to "Credentials" → "Create Credentials" → "OAuth 2.0 Client ID"
+   - Application type: "Chrome Extension"
+   - Add your extension ID (generate one or use a temporary one)
+
+5. Configure OAuth consent screen:
+   - Add your extension's name and description
+   - Add required scopes:
+     - `https://www.googleapis.com/auth/calendar.events`
+     - `https://www.googleapis.com/auth/userinfo.profile`
+
+6. Update `manifest.json`:
+   ```json
+   {
+     "oauth2": {
+       "client_id": "YOUR_ACTUAL_CLIENT_ID.apps.googleusercontent.com",
+       "scopes": [
+         "https://www.googleapis.com/auth/calendar.events",
+         "https://www.googleapis.com/auth/userinfo.profile"
+       ]
+     }
+   }
+   ```
+
+### 3. Development Build
+
+```bash
+npm run dev
+# or
+pnpm dev
+```
+
+### 4. Production Build
+
+```bash
+npm run build
+# or  
+pnpm build
+```
+
+### 5. Load Extension in Chrome
+
+1. Open Chrome and go to `chrome://extensions/`
+2. Enable "Developer mode" (top right toggle)
+3. Click "Load unpacked"
+4. Select the `dist` folder from your build
+5. Note the extension ID generated by Chrome
+6. Update your Google OAuth credentials with this extension ID
+
+## 🧪 Testing
+
+### Running Tests
+
+```bash
+npm test
+# or
+pnpm test
+
+# Run tests with UI
+npm run test:ui
+# or
+pnpm test:ui
+```
+
+### Manual Testing Checklist
+
+- [ ] Side-panel opens when clicking extension icon
+- [ ] Timezone search and autocomplete works
+- [ ] Time slider displays correct times for all zones
+- [ ] Current time marker updates in real-time
+- [ ] Google sign-in process completes successfully
+- [ ] Meeting modal opens when clicking time slots
+- [ ] Calendar events are created with correct details
+- [ ] Google Meet links are automatically added
+- [ ] Settings are persisted across browser sessions
+- [ ] Recent email addresses are saved and suggested
+- [ ] Dark/light mode switches with system preference
+
+## 📱 Usage Guide
+
+### Adding Timezones
+
+1. Click "Add Timezone" in the side-panel
+2. Search for cities, countries, or timezone names
+3. Select from the autocomplete dropdown
+4. Drag and drop to reorder timezones
+
+### Creating Meetings
+
+1. Click on any time slot in the time slider
+2. Fill in meeting details in the modal:
+   - Title (auto-generated based on timezone)
+   - Duration (15 min to 2 hours)
+   - Attendee email addresses
+   - Description (includes timezone comparison)
+3. Click "Create Meeting"
+4. Meeting appears in Google Calendar with Meet link
+
+### Settings & Preferences
+
+- Access via the gear icon or right-click → "Options"
+- Configure default meeting duration
+- Manage recent email addresses
+- Sign out of Google account
+
+## 🚀 Chrome Web Store Publishing
+
+### Pre-Publishing Checklist
+
+- [ ] All Google API credentials are properly configured
+- [ ] Extension icons are optimized (16, 32, 48, 128px PNG)
+- [ ] Privacy policy created (if collecting user data)
+- [ ] Store listing assets prepared:
+  - [ ] Screenshots (1280x800 or 640x400)
+  - [ ] Promotional images
+  - [ ] Detailed description
+- [ ] Extension tested on multiple Chrome versions
+- [ ] Permissions are minimal and justified
+- [ ] Code is minified and optimized
+- [ ] No console errors or warnings
+
+### Publishing Steps
+
+1. Create [Chrome Web Store Developer Account](https://chrome.google.com/webstore/devconsole/) ($5 one-time fee)
+2. Upload the zipped `dist` folder
+3. Fill in store listing details
+4. Add screenshots and promotional images
+5. Set pricing (free recommended for initial launch)
+6. Submit for review (typically 1-3 business days)
+
+### Store Listing Template
+
+**Title**: World Clock Meet Helper
+
+**Short Description**: Compare timezones and create Google Calendar meetings with one click
+
+**Detailed Description**:
+```
+Compare multiple timezones instantly and create Google Calendar meetings with automatic Meet links. Perfect for remote teams and international business.
+
+Key Features:
+🕐 Interactive 24-hour time slider
+🌍 Support for 50+ major timezones  
+📅 One-click Google Calendar integration
+🎥 Automatic Google Meet link generation
+⚡ Real-time timezone conversion
+💾 Persistent timezone preferences
+🌙 Dark/light mode support
+
+Designed specifically for professionals who work across timezones and need to quickly schedule meetings with international clients or team members.
+
+Privacy: This extension only accesses your Google Calendar to create meetings. No data is stored on external servers.
+```
+
+## 🔧 Configuration Options
+
+### Environment Variables
+
+The extension uses Chrome storage instead of environment variables, but you can configure:
+
+- Default meeting duration
+- Auto sign-in preference  
+- Recent email addresses limit
+- Timezone display preferences
+
+### Customization
+
+#### Adding New Timezones
+
+Edit `src/data/timezones.ts` to add more timezone options:
+
+```typescript
+export const timezoneData = [
+  // Add new timezone
+  { 
+    name: 'City Name', 
+    iana: 'Continent/City', 
+    label: 'Display Label', 
+    country: 'Country Name' 
+  },
+  // ... existing timezones
+];
+```
+
+#### Styling Changes
+
+Modify `src/index.css` or component-specific Tailwind classes:
+
+```css
+/* Custom time slot styling */
+.time-slot {
+  @apply bg-blue-50 hover:bg-blue-100 transition-colors;
+}
+
+/* Custom dark mode overrides */
+@media (prefers-color-scheme: dark) {
+  .time-slot {
+    @apply bg-gray-800 hover:bg-gray-700;
+  }
+}
+```
+
+## 🛡️ Privacy & Security
+
+### Data Collection
+
+This extension collects minimal data required for functionality:
+
+- **Google Account Info**: Name, email, profile picture (for authentication)
+- **Calendar Events**: Only events you explicitly create through the extension
+- **Local Storage**: Timezone preferences, recent email addresses
+- **No External Tracking**: No analytics or third-party data collection
+
+### Security Measures
+
+- OAuth 2.0 for secure Google authentication
+- Chrome identity API for token management  
+- No sensitive data stored in extension files
+- Minimal required permissions
+- HTTPS-only API communication
+
+### Permissions Explained
+
+```json
+{
+  "permissions": [
+    "storage",        // Save user preferences locally
+    "identity",       // Google OAuth authentication
+    "sidePanel"       // Display side-panel interface
+  ],
+  "host_permissions": [
+    "https://www.googleapis.com/*"  // Google Calendar API access
+  ]
+}
+```
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**1. "Sign In Failed" Error**
+- Verify Google OAuth client ID in manifest.json  
+- Check that Calendar API is enabled in Google Cloud Console
+- Ensure extension ID matches OAuth credentials
+
+**2. Time Slider Not Displaying**
+- Check browser console for JavaScript errors
+- Verify Luxon library is properly installed
+- Clear extension data and reload
+
+**3. Meetings Not Created**
+- Confirm Google Calendar API permissions
+- Check network connectivity
+- Verify calendar access in Google account settings
+
+**4. Side Panel Won't Open**
+- Ensure Chrome version 114+ (required for side panel API)
+- Check for conflicting extensions
+- Try disabling/re-enabling the extension
+
+### Debug Mode
+
+Enable debug logging by setting in Chrome DevTools console:
+
+```javascript
+localStorage.setItem('debug', 'true');
+```
+
+### Getting Help
+
+1. Check the [Issues](https://github.com/your-repo/issues) page
+2. Search existing issues before creating new ones
+3. Include Chrome version, OS, and error messages
+4. Provide steps to reproduce the problem
+
+## 🔄 Next Iterations
+
+### Performance Improvements
+
+- **Lazy Loading**: Load timezone data on-demand
+- **Virtual Scrolling**: Handle 100+ timezones efficiently  
+- **Caching**: Cache Google Calendar API responses
+- **Web Workers**: Move timezone calculations to background
+
+### UX Enhancements
+
+- **Keyboard Shortcuts**: Quick timezone switching (Ctrl+1, Ctrl+2, etc.)
+- **Meeting Templates**: Save commonly used meeting formats
+- **Bulk Operations**: Create multiple meetings simultaneously
+- **Calendar Sync**: Two-way sync with existing calendar events
+
+### Advanced Features
+
+- **Recurring Meetings**: Support for recurring calendar events
+- **Team Integration**: Share timezone sets with team members
+- **Meeting Analytics**: Track meeting frequency across zones
+- **Holiday Awareness**: Show public holidays in different countries
+- **Weather Integration**: Display weather info for each timezone
+
+### Technical Debt
+
+- **Component Splitting**: Break down large components further
+- **Error Boundaries**: Add React error boundaries for better UX
+- **Accessibility**: Full WCAG 2.1 AA compliance
+- **Internationalization**: Multi-language support
+- **Performance Monitoring**: Add performance metrics and monitoring
+
+### Mobile Support
+
+- **Responsive Design**: Optimize for smaller screens  
+- **Touch Interactions**: Better mobile gesture support
+- **PWA Features**: Add offline functionality
+
+### Integration Opportunities
+
+- **Slack Integration**: Create Slack events alongside calendar
+- **Zoom Integration**: Add Zoom links as alternative to Meet
+- **Notion/Obsidian**: Sync meeting notes and agendas
+- **CRM Integration**: Connect with Salesforce, HubSpot, etc.
+
+---
+
+## 📄 License
+
+MIT License - see LICENSE file for details.
+
+## 👥 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)  
+5. Open a Pull Request
+
+---
+
+**Version**: 1.0.0  
+**Last Updated**: 2025  
+**Minimum Chrome Version**: 114  
+**Supported Platforms**: Windows, macOS, Linux, ChromeOS
