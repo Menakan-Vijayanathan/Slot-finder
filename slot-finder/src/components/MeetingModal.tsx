@@ -2,8 +2,14 @@ import React, { useState, useEffect } from "react";
 import { DateTime } from "luxon";
 import { TimeZone, MeetingDetails } from "../types";
 import { useCalendar } from "../hooks/useCalendar";
-import { useWebStorage as useStorage } from "../hooks/useWebStorage";
-import { X, Calendar, Clock, Loader } from "lucide-react";
+import { X, Clock, Loader2 as Loader, Video, ExternalLink, AlertCircle } from "lucide-react";
+import { useAuthContext } from "../context/AuthContext";
+import { createCalendarEvent } from "../lib/googleCalendar";
+
+interface MeetingDetailsWithId extends Omit<MeetingDetails, 'id' | 'status'> {
+  id?: string;
+  status?: string;
+}
 
 interface MeetingModalProps {
   selectedTime: Date;
@@ -20,16 +26,75 @@ const MeetingModal: React.FC<MeetingModalProps> = ({
   onClose,
   defaultMeetingDuration,
 }) => {
+  const selectedDateTime = DateTime.fromJSDate(selectedTime);
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [duration, setDuration] = useState(defaultMeetingDuration || 60);
+  const [startTime, setStartTime] = useState(selectedDateTime.toFormat("HH:mm"));
+  const [endTime, setEndTime] = useState(selectedDateTime.plus({ minutes: defaultMeetingDuration || 60 }).toFormat("HH:mm"));
   const [attendees, setAttendees] = useState<string[]>([""]);
   const [isCreating, setIsCreating] = useState(false);
 
-  const [recentEmails] = useStorage<string[]>("recentEmails", []);
   const { createEvent } = useCalendar();
+  const { 
+    isSignedIn, 
+    token, 
+    refreshToken 
+  } = useAuthContext();
+  const [isCreatingEvent, setIsCreatingEvent] = useState(false);
+  const [meetingLink, setMeetingLink] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const selectedDateTime = DateTime.fromJSDate(selectedTime);
+  // Utility to get ISO string or fallback to empty string
+  const safeToISO = (dt: DateTime) => dt.toISO() || dt.toFormat('yyyy-MM-dd\'T\'HH:mm:ss');
+
+  const createGoogleCalendarEvent = async (meetingDetails: MeetingDetailsWithId) => {
+    if (!isSignedIn || !token) {
+      console.log('User not signed in or missing token');
+      return null;
+    }
+    
+    try {
+      setIsCreatingEvent(true);
+      setError(null);
+      
+      // Try to create the event with the current token
+      try {
+        const event = await createCalendarEvent(token, meetingDetails);
+        setMeetingLink(event.meetingUrl);
+        return event;
+      } catch (err) {
+        console.warn('Initial calendar event creation failed, checking if token needs refresh:', err);
+        
+        // If we get a 401, the token might be expired, so try to refresh it
+        if (err instanceof Error && (err.message.includes('401') || err.message.includes('token'))) {
+          console.log('Token might be expired, attempting to refresh...');
+          try {
+            // Try to refresh the token
+            const newToken = await refreshToken();
+            if (newToken) {
+              console.log('Token refreshed, retrying event creation...');
+              const event = await createCalendarEvent(newToken, meetingDetails);
+              setMeetingLink(event.meetingUrl);
+              return event;
+            }
+          } catch (refreshError) {
+            console.error('Failed to refresh token:', refreshError);
+            throw new Error('Failed to refresh authentication. Please sign in again.');
+          }
+        }
+        
+        // If we get here, either refresh failed or it wasn't a 401 error
+        throw err;
+      }
+    } catch (err) {
+      console.error('Failed to create Google Calendar event:', err);
+      setError('Failed to create Google Calendar event. Please check your internet connection and try again.');
+      return null;
+    } finally {
+      setIsCreatingEvent(false);
+    }
+  };
 
   // Generate timezone comparison text
   const timezoneComparison = timezones
@@ -45,14 +110,20 @@ const MeetingModal: React.FC<MeetingModalProps> = ({
         timezones.find((tz) => tz.iana !== "Asia/Colombo")?.name || "Client";
       setTitle(`Meeting with ${primaryCity}`);
     }
-
+    // Calculate duration in minutes
+    const [startHour, startMinute] = startTime.split(":").map(Number);
+    const [endHour, endMinute] = endTime.split(":").map(Number);
+    let duration = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
+    if (duration <= 0) duration += 24 * 60; // handle overnight
     setDescription(`Meeting Time Comparison:
 ${timezoneComparison}
 
 Meeting details:
+- Start: ${startTime}
+- End: ${endTime}
 - Duration: ${duration} minutes
 - Google Meet link will be generated automatically`);
-  }, [timezones, timezoneComparison, duration]);
+  }, [timezones, timezoneComparison, startTime, endTime]);
 
   const handleAddAttendee = () => {
     setAttendees([...attendees, ""]);
@@ -72,33 +143,61 @@ Meeting details:
 
   const handleCreateMeeting = async () => {
     setIsCreating(true);
-
     try {
-      const startTime = selectedDateTime.toISO();
-      const endTime = selectedDateTime.plus({ minutes: duration }).toISO();
-
+      // Compose start and end DateTime objects
+      const [startHour, startMinute] = startTime.split(":").map(Number);
+      const [endHour, endMinute] = endTime.split(":").map(Number);
+      const startDateTime = selectedDateTime.set({ hour: startHour, minute: startMinute, second: 0 });
+      let endDateTime = selectedDateTime.set({ hour: endHour, minute: endMinute, second: 0 });
+      
+      // If end is before start, assume next day
+      if (endDateTime <= startDateTime) {
+        endDateTime = endDateTime.plus({ days: 1 });
+      }
+      
       const validAttendees = attendees.filter((email) => email.trim() !== "");
-
-      const meetingDetails: MeetingDetails = {
+      const meetingDetails: MeetingDetailsWithId = {
         title,
         description,
-        startTime: startTime!,
-        endTime: endTime!,
+        startTime: safeToISO(startDateTime),
+        endTime: safeToISO(endDateTime),
         attendees: validAttendees,
         timezone: "Asia/Colombo", // Default to Sri Lankan time
       };
 
-      await createEvent(meetingDetails);
-
-      // Save recent emails
-      if (validAttendees.length > 0) {
-        const updatedEmails = [
-          ...new Set([...validAttendees, ...recentEmails]),
-        ].slice(0, 10);
-        chrome.storage.sync.set({ recentEmails: updatedEmails });
+      // Create Google Calendar event if user is signed in
+      if (isSignedIn) {
+        const googleEvent = await createGoogleCalendarEvent(meetingDetails);
+        if (googleEvent?.meetingUrl) {
+          // Update meeting details with Google Meet link
+          meetingDetails.description = `${meetingDetails.description}\n\nGoogle Meet: ${googleEvent.meetingUrl}`;
+        }
       }
 
-      onCreateMeeting(meetingDetails);
+      // Create local event
+      // Create the final meeting details object with required fields
+      const finalMeetingDetails: MeetingDetails = {
+        title: meetingDetails.title,
+        description: meetingDetails.description || '',
+        startTime: meetingDetails.startTime,
+        endTime: meetingDetails.endTime,
+        attendees: meetingDetails.attendees,
+        timezone: meetingDetails.timezone || 'Asia/Colombo',
+      };
+      
+      // Create the event in local storage
+      await createEvent(finalMeetingDetails);
+      
+      // Call the parent's onCreateMeeting with the final meeting details
+      onCreateMeeting(finalMeetingDetails);
+      
+      // Don't close the modal if we have a meeting link to show
+      if (!isSignedIn || !meetingLink) {
+        onClose();
+      }
+
+      // Removed recent emails functionality as it was causing issues
+      // and isn't critical for the core functionality
     } catch (error) {
       console.error("Failed to create meeting:", error);
       alert("Failed to create meeting. Please try again.");
@@ -162,22 +261,30 @@ Meeting details:
             </div>
           </div>
 
-          {/* Duration */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Duration (minutes)
-            </label>
-            <select
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value={15}>15 minutes</option>
-              <option value={30}>30 minutes</option>
-              <option value={60}>1 hour</option>
-              <option value={90}>1.5 hours</option>
-              <option value={120}>2 hours</option>
-            </select>
+          {/* Start and End Time */}
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Start Time
+              </label>
+              <input
+                type="time"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                End Time
+              </label>
+              <input
+                type="time"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
           </div>
 
           {/* Attendees */}
@@ -193,13 +300,7 @@ Meeting details:
                   onChange={(e) => handleAttendeeChange(index, e.target.value)}
                   className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="Enter email address"
-                  list={`recent-emails-${index}`}
                 />
-                <datalist id={`recent-emails-${index}`}>
-                  {recentEmails.map((recentEmail) => (
-                    <option key={recentEmail} value={recentEmail} />
-                  ))}
-                </datalist>
                 {attendees.length > 1 && (
                   <button
                     onClick={() => handleRemoveAttendee(index)}
@@ -234,30 +335,78 @@ Meeting details:
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 p-4 border-t border-gray-200 dark:border-gray-700">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleCreateMeeting}
-            disabled={!title.trim() || isCreating}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isCreating ? (
-              <>
-                <Loader className="w-4 h-4 animate-spin" />
-                Creating...
-              </>
-            ) : (
-              <>
-                <Calendar className="w-4 h-4" />
-                Create Meeting
-              </>
+        <div className="mt-6 space-y-4">
+          {error && (
+            <div className="rounded-md bg-red-50 p-4">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <AlertCircle className="h-5 w-5 text-red-400" aria-hidden="true" />
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-red-800">{error}</h3>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {meetingLink && (
+            <div className="rounded-md bg-green-50 p-4">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <Video className="h-5 w-5 text-green-400" aria-hidden="true" />
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-green-800">Meeting created successfully!</h3>
+                  <div className="mt-2 text-sm text-green-700">
+                    <a
+                      href={meetingLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center text-green-600 hover:text-green-500"
+                    >
+                      Join Google Meet <ExternalLink className="ml-1 h-3 w-3" />
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end space-x-3">
+            {!meetingLink && (
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
+              >
+                Cancel
+              </button>
             )}
-          </button>
+            
+            {!meetingLink ? (
+              <button
+                onClick={handleCreateMeeting}
+                disabled={isCreating || isCreatingEvent || !title.trim()}
+              >
+                {(isCreating || isCreatingEvent) ? (
+                  <>
+                    <Loader className="mr-2 h-4 w-4 animate-spin" />
+                    {isCreatingEvent ? 'Creating Calendar Event...' : 'Creating Meeting...'}
+                  </>
+                ) : (
+                  <>
+                    {isSignedIn ? 'Create with Google Calendar' : 'Create Meeting'}
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                onClick={onClose}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                Done
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

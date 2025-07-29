@@ -1,26 +1,22 @@
 import React, { useState } from "react";
 import { Home, AlertTriangle, Check, X } from "lucide-react";
-import { useHomeCountry } from "../../hooks/useHomeCountry";
+import { useZones } from "../../context/ZonesContext";
 import CountrySelector from "../onboarding/CountrySelector";
+import { timezoneData } from "../../data/timezones";
+import { COUNTRY_FLAGS } from "../../utils/timezone";
 import { cn } from "../../utils";
 
-interface HomeCountryManagerProps {
-  className?: string;
-}
-
-const HomeCountryManager: React.FC<HomeCountryManagerProps> = ({
-  className,
-}) => {
+const HomeCountryManager: React.FC = () => {
   const {
     homeCountry,
     homeTimezone,
-    isLoading,
+    loading: isLoading,
     error,
-    hasHomeCountry,
-    changeHomeCountry,
-    validateHomeCountryChange,
+    setHomeCountry,
     getHomeTimezone,
-  } = useHomeCountry();
+  } = useZones();
+
+  const hasHomeCountry = Boolean(homeCountry && homeTimezone);
 
   const [isEditing, setIsEditing] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState(homeCountry);
@@ -34,13 +30,18 @@ const HomeCountryManager: React.FC<HomeCountryManagerProps> = ({
     setSelectedCountry(countryName);
     setValidationError(null);
 
-    // Validate the selection
-    const validation = validateHomeCountryChange(countryName);
-    if (!validation.isValid) {
-      setValidationError(validation.error || "Invalid country selection");
+    // Find timezone info from our data
+    const timezoneInfo = timezoneData.find(tz => tz.iana === timezone);
+    if (!timezoneInfo) {
+      setValidationError("Invalid timezone selection");
       setPreviewTimezone(null);
     } else {
-      setPreviewTimezone(validation.previewTimezone);
+      setPreviewTimezone({
+        name: timezoneInfo.name,
+        iana: timezone,
+        country: countryName,
+        label: timezoneInfo.label
+      });
     }
   };
 
@@ -74,22 +75,18 @@ const HomeCountryManager: React.FC<HomeCountryManagerProps> = ({
 
   // Confirm the home country change
   const handleConfirmChange = async () => {
-    if (!selectedCountry) return;
+    if (!selectedCountry || !previewTimezone) return;
 
     setIsChanging(true);
     try {
-      const result = await changeHomeCountry(selectedCountry);
-
-      if (result.success) {
-        setIsEditing(false);
-        setShowConfirmation(false);
-        setPreviewTimezone(null);
-        setValidationError(null);
-      } else {
-        setValidationError(result.error || "Failed to change home country");
-      }
+      setHomeCountry(selectedCountry, previewTimezone.iana);
+      
+      setIsEditing(false);
+      setShowConfirmation(false);
+      setPreviewTimezone(null);
+      setValidationError(null);
     } catch (error) {
-      setValidationError("An unexpected error occurred");
+      setValidationError("Failed to change home country");
     } finally {
       setIsChanging(false);
     }
@@ -103,7 +100,7 @@ const HomeCountryManager: React.FC<HomeCountryManagerProps> = ({
   const currentHomeTimezone = getHomeTimezone();
 
   return (
-    <div className={cn("space-y-4", className)}>
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center gap-2">
         <Home className="h-5 w-5 text-blue-600 dark:text-blue-400" />
@@ -117,15 +114,15 @@ const HomeCountryManager: React.FC<HomeCountryManagerProps> = ({
         <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 rounded-lg p-4 border border-blue-200 dark:border-blue-700">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              {currentHomeTimezone?.flag && (
-                <span className="text-2xl">{currentHomeTimezone.flag}</span>
-              )}
+              <span className="text-2xl">
+                {COUNTRY_FLAGS[homeCountry] || "🌍"}
+              </span>
               <div>
                 <p className="font-medium text-gray-900 dark:text-white">
                   {homeCountry}
                 </p>
                 <p className="text-sm text-gray-600 dark:text-gray-300">
-                  {homeTimezone} • {currentHomeTimezone?.name}
+                  {homeTimezone} • {currentHomeTimezone?.name || 'Home Timezone'}
                 </p>
               </div>
             </div>

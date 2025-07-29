@@ -1,3 +1,5 @@
+import moment from 'moment';
+
 // Enhanced TimeZone interface with home country support
 export interface TimeZone {
   id: string;
@@ -9,6 +11,32 @@ export interface TimeZone {
   flag?: string; // Country flag emoji or URL
   flagEmoji?: string; // Emoji for the flag (for UI)
   countryCode?: string; // ISO country code (for UI)
+}
+
+// Meeting interface for tracking scheduled meetings
+export interface Meeting {
+  id: string;
+  title: string;
+  startTime: Date;
+  endTime: Date;
+  timezone: string; // IANA timezone
+  attendees: string[];
+  color?: string; // Color for the meeting indicator
+}
+
+// Time period indicators
+export type TimePeriod = 'morning' | 'afternoon' | 'evening' | 'night';
+
+// Enhanced grid slot data
+export interface TimeSlotData {
+  time: Date;
+  originalTime: moment.Moment; // Keep moment object for calculations
+  localTime: Date;
+  timezone: TimeZone;
+  period: TimePeriod;
+  isWorkingHour: boolean;
+  meetings: Meeting[];
+  isDifferentDay: boolean;
 }
 
 export interface MeetingDetails {

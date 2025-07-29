@@ -1,45 +1,35 @@
-import React, { useState } from "react";
-import { TimeZone } from "../types";
-import { timezoneData } from "../data/timezones";
-import { Plus, X, GripVertical, Search, Home } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Plus, X, GripVertical, Search, AlertCircle, Home, Star, Clock } from "lucide-react";
 import { DragDropContext, Droppable, Draggable } from "react-beautiful-dnd";
-import { COUNTRY_FLAGS } from "../utils/timezone";
 import { cn } from "../utils";
-import CountrySelector from "./onboarding/CountrySelector";
+import { useZones } from "../context/ZonesContext";
+import { timezoneData } from "../data/timezones";
+import { getTimezoneDisplayData } from "../utils/timezoneUtils";
+import { DateTime } from "luxon";
+import { COUNTRY_FLAGS } from "../utils/timezone";
 
-interface TimeZoneManagerProps {
-  timezones: TimeZone[];
-  onAddTimezone: (timezone: TimeZone) => void;
-  onRemoveTimezone: (id: string) => void;
-  onReorderTimezones: (timezones: TimeZone[]) => void;
-  homeCountryHook: ReturnType<typeof import("../hooks/useHomeCountry").useHomeCountry>;
-}
+// Color generation function to match TimeSlider row colors
+const getZoneColor = (index: number): string => {
+  const colors = [
+    'bg-blue-500',
+    'bg-green-500', 
+    'bg-purple-500',
+    'bg-orange-500',
+    'bg-pink-500',
+    'bg-indigo-500',
+    'bg-red-500',
+    'bg-yellow-500',
+    'bg-teal-500',
+    'bg-cyan-500'
+  ];
+  return colors[index % colors.length];
+};
 
-const TimeZoneManager: React.FC<TimeZoneManagerProps> = ({
-  timezones,
-  onAddTimezone,
-  onRemoveTimezone,
-  onReorderTimezones,
-  homeCountryHook,
-}) => {
+const TimeZoneManager: React.FC = () => {
+  const { zones, addZone, removeZone, reorderZones, setHomeCountry, error, clearError } = useZones();
   const [searchTerm, setSearchTerm] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [showHomeTimezoneModal, setShowHomeTimezoneModal] = useState(false);
-  const [isChangingHome, setIsChangingHome] = useState(false);
-  const [pendingHomeCountry, setPendingHomeCountry] = useState<string>("");
-  const [pendingHomeTimezone, setPendingHomeTimezone] = useState<string>("");
-  const [changeError, setChangeError] = useState<string | null>(null);
-
-  // Home country management (from prop)
-  const {
-    isHomeTimezone,
-    addHomeTimezoneToList,
-    homeCountry,
-    changeHomeCountry,
-    homeTimezone,
-    isLoading: homeLoading,
-    getAvailableCountries,
-  } = homeCountryHook;
+  const [showHomeDialog, setShowHomeDialog] = useState<string | null>(null);
 
   const filteredTimezones = timezoneData
     .filter(
@@ -48,18 +38,10 @@ const TimeZoneManager: React.FC<TimeZoneManagerProps> = ({
         tz.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
         tz.country.toLowerCase().includes(searchTerm.toLowerCase())
     )
-    .filter(
-      (tz) =>
-        !timezones.some((existing) => existing.iana === tz.iana) &&
-        tz.iana !== homeTimezone // Exclude home timezone
-    );
+    .filter((tz) => !zones.some((existing) => existing.iana === tz.iana));
 
-  const handleAddTimezone = (timezone: Omit<TimeZone, "id">) => {
-    const newTimezone: TimeZone = {
-      ...timezone,
-      id: Date.now().toString(),
-    };
-    onAddTimezone(newTimezone);
+  const handleAddTimezone = (timezone: Omit<import("../types").TimeZone, "id">) => {
+    addZone(timezone);
     setSearchTerm("");
     setIsSearchOpen(false);
   };
@@ -67,70 +49,46 @@ const TimeZoneManager: React.FC<TimeZoneManagerProps> = ({
   const handleDragEnd = (result: any) => {
     if (!result.destination) return;
 
-    const items = Array.from(timezones);
+    const items = Array.from(zones);
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
 
-    onReorderTimezones(items);
+    reorderZones(items);
   };
 
-  // Handle timezone removal with home timezone protection
-  const handleRemoveTimezone = (id: string) => {
-    if (isHomeTimezone(id)) {
-      // Show modal explaining why home timezone cannot be removed
-      setShowHomeTimezoneModal(true);
-      return;
+  const handleSetAsHome = (timezone: any) => {
+    setShowHomeDialog(timezone.id);
+  };
+
+  const confirmSetAsHome = () => {
+    if (!showHomeDialog) return;
+    
+    const timezone = zones.find(z => z.id === showHomeDialog);
+    if (timezone) {
+      setHomeCountry(timezone.country || timezone.name, timezone.iana);
     }
-    onRemoveTimezone(id);
+    setShowHomeDialog(null);
   };
 
-  // Ensure timezones include home timezone at the top
-  const displayTimezones = addHomeTimezoneToList(timezones);
+  const cancelSetAsHome = () => {
+    setShowHomeDialog(null);
+  };
+
+  // Handle hover effects for visual connection with TimeSlider
+  const handleZoneHover = (zoneId: string, isHovering: boolean) => {
+    // Find all time slot rows in TimeSlider and apply hover effect
+    const timeSliderRows = document.querySelectorAll(`[data-zone-id="${zoneId}"]`);
+    timeSliderRows.forEach(row => {
+      if (isHovering) {
+        row.classList.add('ring-2', 'ring-blue-500/30', 'bg-blue-50/20', 'dark:bg-blue-900/20');
+      } else {
+        row.classList.remove('ring-2', 'ring-blue-500/30', 'bg-blue-50/20', 'dark:bg-blue-900/20');
+      }
+    });
+  };
 
   return (
     <div className="h-full flex flex-col min-h-0" data-tour="timezone-manager">
-      {/* Home Country Selector */}
-      <div className="p-4 border-b border-gray-200/50 dark:border-gray-700/30 bg-gradient-to-r from-blue-50/40 to-cyan-50/20 dark:from-blue-900/10 dark:to-cyan-900/10 flex items-center gap-4">
-        <span className="font-semibold text-gray-700 dark:text-gray-200">
-          Home Country:
-        </span>
-        <CountrySelector
-          value={pendingHomeCountry || homeCountry}
-          onChange={(country, timezone) => {
-            setPendingHomeCountry(country);
-            setPendingHomeTimezone(timezone);
-            setChangeError(null);
-          }}
-          placeholder="Select your home country..."
-        />
-        <button
-          className="ml-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
-          disabled={
-            homeLoading ||
-            !pendingHomeCountry ||
-            pendingHomeCountry === homeCountry
-          }
-          onClick={async () => {
-            if (!pendingHomeCountry) return;
-            const result = await changeHomeCountry(pendingHomeCountry);
-            if (!result.success) {
-              setChangeError(result.error || "Failed to change home country");
-            } else {
-              setPendingHomeCountry("");
-              setPendingHomeTimezone("");
-              setChangeError(null);
-            }
-          }}
-        >
-          Save
-        </button>
-        {homeLoading && (
-          <span className="ml-2 text-xs text-gray-500">Saving...</span>
-        )}
-        {changeError && (
-          <span className="ml-2 text-xs text-red-500">{changeError}</span>
-        )}
-      </div>
       {/* Custom Scrollbar Styles */}
       <style>{`
         .timezone-scroll::-webkit-scrollbar {
@@ -164,6 +122,7 @@ const TimeZoneManager: React.FC<TimeZoneManagerProps> = ({
           scrollbar-color: #9ca3af #374151;
         }
       `}</style>
+
       {/* Header Section */}
       <div className="p-8 border-b border-gray-200/50 dark:border-gray-700/30">
         <div className="flex items-center gap-4 mb-6">
@@ -179,6 +138,24 @@ const TimeZoneManager: React.FC<TimeZoneManagerProps> = ({
             </p>
           </div>
         </div>
+
+        {/* Error Display */}
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-xl">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+              <span className="text-red-700 dark:text-red-300 text-sm font-medium">
+                {error}
+              </span>
+              <button
+                onClick={clearError}
+                className="ml-auto text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
         <button
           onClick={() => setIsSearchOpen(!isSearchOpen)}
@@ -222,26 +199,16 @@ const TimeZoneManager: React.FC<TimeZoneManagerProps> = ({
               <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-48 overflow-y-auto timezone-scroll">
                 {filteredTimezones.length > 0 ? (
                   filteredTimezones.slice(0, 10).map((timezone) => {
-                    // Check if this timezone's country matches the user's home country
-                    const isHomeCountryTimezone =
-                      timezone.country === homeCountry;
-                    // Get country flag from the COUNTRY_FLAGS mapping
                     const countryFlag = COUNTRY_FLAGS[timezone.country] || "🌍";
 
                     return (
                       <button
                         key={timezone.iana}
                         onClick={() => handleAddTimezone(timezone)}
-                        title={
-                          isHomeCountryTimezone
-                            ? `${timezone.name} is in your home country (${timezone.country})`
-                            : `Add ${timezone.name} timezone`
-                        }
+                        title={`Add ${timezone.name} timezone`}
                         className={cn(
                           "w-full px-4 py-2 text-left border-b border-gray-200 dark:border-gray-600 last:border-b-0 transition-all duration-200",
-                          isHomeCountryTimezone
-                            ? "bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 hover:from-blue-100 hover:to-cyan-100 dark:hover:from-blue-800/30 dark:hover:to-cyan-800/30 border-blue-200 dark:border-blue-700"
-                            : "hover:bg-gray-100 dark:hover:bg-gray-700"
+                          "hover:bg-gray-100 dark:hover:bg-gray-700"
                         )}
                       >
                         <div className="flex items-center gap-2">
@@ -254,28 +221,15 @@ const TimeZoneManager: React.FC<TimeZoneManagerProps> = ({
                             <div
                               className={cn(
                                 "font-medium flex items-center gap-2",
-                                isHomeCountryTimezone
-                                  ? "text-blue-900 dark:text-blue-100"
-                                  : "text-gray-900 dark:text-white"
+                                "text-gray-900 dark:text-white"
                               )}
                             >
                               {timezone.name}
-                              {/* Home country indicator */}
-                              {isHomeCountryTimezone && (
-                                <div className="flex items-center gap-1">
-                                  <Home className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                                  <span className="text-xs font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wide">
-                                    Home Country
-                                  </span>
-                                </div>
-                              )}
                             </div>
                             <div
                               className={cn(
                                 "text-sm",
-                                isHomeCountryTimezone
-                                  ? "text-blue-700 dark:text-blue-300"
-                                  : "text-gray-500 dark:text-gray-400"
+                                "text-gray-500 dark:text-gray-400"
                               )}
                             >
                               {timezone.label} • {timezone.country}
@@ -315,7 +269,7 @@ const TimeZoneManager: React.FC<TimeZoneManagerProps> = ({
                   ]
                 )}
               >
-                {displayTimezones.length === 0 && (
+                {zones.length === 0 && (
                   <div className="flex items-center justify-center py-16 text-gray-500 dark:text-gray-400">
                     <div className="text-center">
                       <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800 rounded-full flex items-center justify-center">
@@ -329,162 +283,159 @@ const TimeZoneManager: React.FC<TimeZoneManagerProps> = ({
                   </div>
                 )}
 
-                {displayTimezones.map((timezone, index) => (
-                  <Draggable
-                    key={timezone.id}
-                    draggableId={timezone.id}
-                    index={index}
-                  >
-                    {(provided, snapshot) => {
-                      const isHome =
-                        timezone.isHome || isHomeTimezone(timezone.id);
+                {zones.map((timezone, index) => {
+                  // Determine if this is the home timezone
+                  const isHome = timezone.isHome || index === 0;
+                  const tzDisplay = getTimezoneDisplayData(timezone, DateTime.now());
 
-                      return (
-                        <div
-                          ref={provided.innerRef}
-                          {...provided.draggableProps}
-                          style={{
-                            ...provided.draggableProps.style,
-                            // Add smooth transitions for non-dragging state
-                            ...(snapshot.isDragging
-                              ? {}
-                              : {
-                                  transform: "none",
-                                  transition: "all 0.2s ease-out",
-                                }),
-                          }}
-                          className={cn(
-                            "flex items-center justify-between p-6 transition-all duration-200 ease-out",
-                            // Base styling with modern glass effect
-                            "rounded-2xl mx-4 mb-4 backdrop-blur-sm",
-                            // Home timezone styling
-                            isHome && [
-                              "bg-gradient-to-r from-blue-500/10 to-cyan-500/10 dark:from-blue-400/20 dark:to-cyan-400/20",
-                              "border border-blue-200/60 dark:border-blue-400/30",
-                              "shadow-lg shadow-blue-500/20",
-                              "ring-1 ring-blue-500/20",
-                            ],
-                            // Regular timezone styling
-                            !isHome && [
+                  return (
+                    <Draggable
+                      key={timezone.id}
+                      draggableId={timezone.id}
+                      index={index}
+                    >
+                      {(provided, snapshot) => {
+                        return (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.draggableProps}
+                            style={{
+                              ...provided.draggableProps.style,
+                              // Add smooth transitions for non-dragging state
+                              ...(snapshot.isDragging
+                                ? {}
+                                : {
+                                    transform: "none",
+                                    transition: "all 0.2s ease-out",
+                                  }),
+                            }}
+                            className={cn(
+                              "flex items-center justify-between p-3 transition-all duration-200 ease-out",
+                              // Base styling with modern glass effect
+                              "rounded-2xl mx-4 mb-2 backdrop-blur-sm",
                               "bg-white/60 dark:bg-gray-800/60",
                               "border border-gray-200/60 dark:border-gray-600/40",
                               "shadow-lg shadow-gray-500/10",
                               "hover:shadow-xl hover:shadow-gray-500/20",
-                            ],
-                            // Enhanced dragging state
-                            snapshot.isDragging && [
-                              "transform rotate-1 scale-110",
-                              "shadow-2xl shadow-blue-500/30",
-                              "z-50",
-                              "ring-2 ring-blue-500/50",
-                              isHome
-                                ? "bg-gradient-to-r from-blue-500/20 to-cyan-500/20"
-                                : "bg-white/90 dark:bg-gray-700/90",
-                            ],
-                            // Hover effect for non-dragging items
-                            !snapshot.isDragging && [
-                              "hover:transform hover:scale-105 hover:-translate-y-1",
-                              isHome
-                                ? "hover:shadow-xl hover:shadow-blue-500/30"
-                                : "hover:bg-white/80 dark:hover:bg-gray-700/80",
-                            ]
-                          )}
-                          data-tour={index === 0 ? "timezone-card" : undefined}
-                        >
-                          <div className="flex items-center gap-4 flex-1">
-                            <div
-                              {...provided.dragHandleProps}
-                              className={cn(
-                                "cursor-grab active:cursor-grabbing transition-all duration-200 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700",
-                                // Enhanced drag handle styling
-                                "hover:scale-110 active:scale-95",
-                                snapshot.isDragging &&
-                                  "cursor-grabbing scale-110",
-                                isHome
-                                  ? "text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30"
-                                  : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                              )}
-                            >
-                              <GripVertical
+                              // Enhanced dragging state
+                              snapshot.isDragging && [
+                                "transform rotate-1 scale-110",
+                                "shadow-2xl shadow-blue-500/30",
+                                "z-50",
+                                "ring-2 ring-blue-500/50",
+                                "bg-white/90 dark:bg-gray-700/90",
+                              ],
+                              // Hover effect for non-dragging items
+                              !snapshot.isDragging && [
+                                "hover:transform hover:scale-105 hover:-translate-y-1",
+                                "hover:bg-white/80 dark:hover:bg-gray-700/80",
+                              ],
+                              // Home timezone special styling
+                              isHome && [
+                                "ring-2 ring-blue-400/30 dark:ring-blue-500/30",
+                                "bg-gradient-to-r from-blue-50/80 to-cyan-50/40 dark:from-blue-900/20 dark:to-cyan-900/10",
+                              ]
+                            )}
+                            data-zone-id={timezone.id}
+                            data-tour={index === 0 ? "timezone-card" : undefined}
+                            onMouseEnter={() => handleZoneHover(timezone.id, true)}
+                            onMouseLeave={() => handleZoneHover(timezone.id, false)}
+                          >
+                            <div className="flex items-center gap-2 flex-1">
+                              {/* Color badge stripe for visual connection with TimeSlider */}
+                              <div className={cn(
+                                "w-1 h-8 rounded-full flex-shrink-0 transition-all duration-200",
+                                getZoneColor(index)
+                              )} />
+                              
+                              <div
+                                {...provided.dragHandleProps}
                                 className={cn(
-                                  "w-5 h-5 transition-transform duration-200",
-                                  snapshot.isDragging && "animate-pulse"
+                                  "cursor-grab active:cursor-grabbing transition-all duration-200 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700",
+                                  // Enhanced drag handle styling
+                                  "hover:scale-110 active:scale-95",
+                                  snapshot.isDragging &&
+                                    "cursor-grabbing scale-110",
+                                  isHome
+                                    ? "text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30"
+                                    : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                                 )}
-                              />
-                            </div>
+                              >
+                                <GripVertical
+                                  className={cn(
+                                    "w-5 h-5 transition-transform duration-200",
+                                    snapshot.isDragging && "animate-pulse"
+                                  )}
+                                />
+                              </div>
 
-                            <div className="flex items-center gap-3">
-                              {/* Country flag if available */}
-                              {timezone.flag && (
-                                <span className="text-2xl">
-                                  {timezone.flag}
-                                </span>
-                              )}
-
-                              {/* Home icon for home timezone */}
-                              {isHome && (
-                                <div className="flex items-center gap-2 px-2 py-1 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                                  <Home className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                                  <span className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wide">
-                                    Home
+                              <div className="flex items-center gap-3">
+                                {/* Country flag if available */}
+                                {timezone.flag && (
+                                  <span className="text-2xl">
+                                    {timezone.flag}
                                   </span>
+                                )}
+                              </div>
+
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <div
+                                    className={cn(
+                                      "font-semibold text-base transition-colors truncate",
+                                      isHome
+                                        ? "text-blue-900 dark:text-blue-100"
+                                        : "text-gray-900 dark:text-white"
+                                    )}
+                                  >
+                                    {timezone.name}
+                                  </div>
+                                  {isHome && (
+                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                                      HOME
+                                    </span>
+                                  )}
                                 </div>
+                                <div
+                                  className={cn(
+                                    "text-sm transition-colors",
+                                    isHome
+                                      ? "text-blue-700 dark:text-blue-300"
+                                      : "text-gray-500 dark:text-gray-400"
+                                  )}
+                                >
+                                  {timezone.label}
+                                </div>
+                                <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                                  Current: {tzDisplay.currentTime.toFormat("HH:mm")} • {tzDisplay.offsetDisplay}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              {!isHome && (
+                                <button
+                                  onClick={() => handleSetAsHome(timezone)}
+                                  className="p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 rounded-md hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                                  title="Set as home timezone"
+                                >
+                                  <Home className="w-4 h-4" />
+                                </button>
                               )}
-                            </div>
-
-                            <div className="flex-1 min-w-0">
-                              <div
-                                className={cn(
-                                  "font-semibold text-base transition-colors truncate",
-                                  isHome
-                                    ? "text-blue-900 dark:text-blue-100"
-                                    : "text-gray-900 dark:text-white"
-                                )}
-                              >
-                                {timezone.name}
-                              </div>
-                              <div
-                                className={cn(
-                                  "text-sm transition-colors",
-                                  isHome
-                                    ? "text-blue-700 dark:text-blue-300"
-                                    : "text-gray-500 dark:text-gray-400"
-                                )}
-                              >
-                                {timezone.label}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            {/* Home timezone cannot be removed */}
-                            {isHome ? (
                               <button
-                                onClick={() =>
-                                  handleRemoveTimezone(timezone.id)
-                                }
-                                className="p-1 text-blue-400 dark:text-blue-500 hover:text-blue-600 dark:hover:text-blue-300 rounded-md hover:bg-blue-100 dark:hover:bg-blue-800/50 transition-colors cursor-pointer"
-                                title="Home timezone cannot be removed. Click to learn more."
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() =>
-                                  handleRemoveTimezone(timezone.id)
-                                }
-                                className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                onClick={() => removeZone(timezone.id)}
+                                className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                                 title="Remove timezone"
                               >
                                 <X className="w-4 h-4" />
                               </button>
-                            )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    }}
-                  </Draggable>
-                ))}
+                        );
+                      }}
+                    </Draggable>
+                  );
+                })}
                 {provided.placeholder}
               </div>
             )}
@@ -492,41 +443,67 @@ const TimeZoneManager: React.FC<TimeZoneManagerProps> = ({
         </DragDropContext>
       </div>
 
-      {/* Home Timezone Protection Modal */}
-      {showHomeTimezoneModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="flex items-center justify-center w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-full">
-                <Home className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+      {/* Home Country Confirmation Dialog */}
+      {showHomeDialog && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 max-w-md w-full mx-4 transform transition-all duration-300 scale-100">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="flex items-center justify-center w-12 h-12 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl">
+                  <Home className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                    Set Home Timezone
+                  </h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    This will be your primary timezone
+                  </p>
+                </div>
               </div>
-              <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Cannot Remove Home Timezone
-              </h4>
-            </div>
-
-            <div className="space-y-3 mb-6">
-              <p className="text-gray-600 dark:text-gray-300">
-                Your home timezone ({homeCountry}) cannot be removed as it
-                serves as your primary reference for meeting scheduling and time
-                comparisons.
+              
+              {(() => {
+                const timezone = zones.find(z => z.id === showHomeDialog);
+                if (!timezone) return null;
+                
+                return (
+                  <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 mb-6">
+                    <div className="flex items-center gap-3">
+                      {timezone.flag && (
+                        <span className="text-2xl">{timezone.flag}</span>
+                      )}
+                      <div>
+                        <div className="font-semibold text-gray-900 dark:text-white">
+                          {timezone.name}
+                        </div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400">
+                          {timezone.label} • {timezone.country}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+              
+              <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
+                This timezone will be marked as your home location and moved to the top of your list. 
+                It will also be used as the reference point in the time slider.
               </p>
-
-              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
-                <p className="text-sm text-blue-700 dark:text-blue-300">
-                  <strong>To change your home timezone:</strong> Go to Settings
-                  and select a different home country.
-                </p>
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={cancelSetAsHome}
+                  className="flex-1 px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmSetAsHome}
+                  className="flex-1 px-4 py-3 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+                >
+                  Set as Home
+                </button>
               </div>
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                onClick={() => setShowHomeTimezoneModal(false)}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
-              >
-                Got it
-              </button>
             </div>
           </div>
         </div>
